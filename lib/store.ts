@@ -6,12 +6,12 @@ const redis = new Redis({
 });
 
 const SEEN_KEY = "reality:seen_ids";
-const TTL = 60 * 60 * 24 * 30; // 30 dní
+const TTL = 60 * 60 * 24 * 30;
 
 export async function filterNewIds(ids: string[]): Promise<string[]> {
   if (ids.length === 0) return [];
 
-  const stored = await redis.smembers<string>(SEEN_KEY);
+  const stored = await redis.smembers(SEEN_KEY);
   const storedSet = new Set(stored || []);
   const newIds = ids.filter((id) => !storedSet.has(id));
 
