@@ -1,0 +1,24 @@
+{
+  "name": "reality-watchdog",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@upstash/redis": "^1.37.0",
+    "next": "14.2.5",
+    "react": "^18",
+    "react-dom": "^18",
+    "resend": "^3.2.0",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/xml2js": "^0.4.14",
+    "typescript": "^5"
+  }
+}
