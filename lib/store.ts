@@ -11,8 +11,8 @@ const TTL = 60 * 60 * 24 * 30;
 export async function filterNewIds(ids: string[]): Promise<string[]> {
   if (ids.length === 0) return [];
 
-  const stored = await redis.smembers(SEEN_KEY);
-  const storedSet = new Set(stored || []);
+  const stored = await redis.smembers(SEEN_KEY) as unknown[];
+  const storedSet = new Set(stored.map(String));
   const newIds = ids.filter((id) => !storedSet.has(id));
 
   if (newIds.length > 0) {
