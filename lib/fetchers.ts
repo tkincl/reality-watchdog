@@ -125,8 +125,7 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
 }
 
 // ─────────────────────────────────────────────
-// SREALITY – URL přímo z SEO dat API
-// Správný formát: /detail/prodej/byt/2+kk/ceske-budejovice-.../hash
+// SREALITY – jednoduchá URL jen s hash ID
 // ─────────────────────────────────────────────
 const CB_KEYWORDS = ["české budějovice", "budějovice"];
 
@@ -176,16 +175,8 @@ export async function fetchSreality(): Promise<Listing[]> {
           ? `${Number(priceRaw).toLocaleString("cs-CZ")} Kč`
           : "Cena neuvedena";
 
-        // URL sestavíme ze SEO objektu přímo z API
-        // Formát: /detail/prodej/{category_main_cb}/{sub_category_cb}/{locality}/{hash}
-        const seo = e.seo || {};
-        const categoryMain = seo.category_main_cb || "";
-        const categorySub = seo.category_sub_cb || "";
-        const seoLocality = seo.locality || "ceske-budejovice";
-
-        let url = `https://www.sreality.cz/detail/prodej/${categoryMain}`;
-        if (categorySub) url += `/${categorySub}`;
-        url += `/${seoLocality}/${hash}`;
+        // Jednoduchá URL — Sreality si hash najde samo
+        const url = `https://www.sreality.cz/detail/prodej/byt/x/x/${hash}`;
 
         listings.push({
           id: `sreality_${hash}`,
