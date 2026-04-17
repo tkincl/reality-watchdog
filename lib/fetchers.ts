@@ -11,47 +11,45 @@ export interface Listing {
 }
 
 // ─────────────────────────────────────────────
-// BAZOŠ – RSS feed
+// BAZOŠ – RSS feed, pouze prodej v ČB
 // ─────────────────────────────────────────────
 export async function fetchBazos(): Promise<Listing[]> {
-  const urls = [
-    "https://www.bazos.cz/rss.php?rub=re&hlokalita=České+Budějovice&okruh=0",
-  ];
-
+  const url = "https://www.bazos.cz/rss.php?rub=re&hlokalita=České+Budějovice&okruh=0";
   const listings: Listing[] = [];
 
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0 RealityWatchdog/1.0" },
-        next: { revalidate: 0 },
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 RealityWatchdog/1.0" },
+      next: { revalidate: 0 },
+    });
+    if (!res.ok) return listings;
+    const xml = await res.text();
+    const parsed = await parseStringPromise(xml, { explicitArray: false });
+    const items = parsed?.rss?.channel?.item;
+    if (!items) return listings;
+    const arr = Array.isArray(items) ? items : [items];
+
+    for (const item of arr) {
+      const title: string = item.title || "";
+      const link: string = item.link || "";
+      const desc: string = item.description || "";
+
+      if (!link) continue;
+      if (isPronajemText(title) || isPronajemText(desc)) continue;
+      if (isMaj(title) || isMaj(desc)) continue;
+
+      listings.push({
+        id: `bazos_${link}`,
+        title,
+        price: extractPrice(desc || title),
+        url: link,
+        source: "Bazoš",
+        description: stripHtml(desc).slice(0, 200),
+        location: "České Budějovice",
       });
-      if (!res.ok) continue;
-      const xml = await res.text();
-      const parsed = await parseStringPromise(xml, { explicitArray: false });
-      const items = parsed?.rss?.channel?.item;
-      if (!items) continue;
-      const arr = Array.isArray(items) ? items : [items];
-
-      for (const item of arr) {
-        const title: string = item.title || "";
-        const link: string = item.link || "";
-        if (!link) continue;
-        if (isMaj(title) || isMaj(item.description || "")) continue;
-
-        listings.push({
-          id: `bazos_${link}`,
-          title,
-          price: extractPrice(item.description || title),
-          url: link,
-          source: "Bazoš",
-          description: stripHtml(item.description || "").slice(0, 200),
-          location: "České Budějovice",
-        });
-      }
-    } catch (e) {
-      console.error("Bazoš fetch error:", e);
     }
+  } catch (e) {
+    console.error("Bazoš fetch error:", e);
   }
 
   return listings;
@@ -117,7 +115,7 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
           : "Cena neuvedena",
         url: `https://www.bezrealitky.cz/${item.uri}`,
         source: "Bezrealitky",
-        description: item.note?.slice(0, 200),
+        description: (item.note || "").slice(0, 200),
         location: item.locality?.address || "České Budějovice",
       }));
   } catch (e) {
@@ -127,7 +125,8 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
 }
 
 // ─────────────────────────────────────────────
-// SREALITY – locality_district_id=1 = okres České Budějovice
+// SREALITY – URL přímo z SEO dat API
+// Správný formát: /detail/prodej/byt/2+kk/ceske-budejovice-.../hash
 // ─────────────────────────────────────────────
 const CB_KEYWORDS = ["české budějovice", "budějovice"];
 
@@ -138,20 +137,13 @@ function isCB(text: string): boolean {
 
 export async function fetchSreality(): Promise<Listing[]> {
   const BASE = "https://www.sreality.cz/api/cs/v2/estates";
-  // locality_district_id=1 = okres České Budějovice (správné ID!)
   const PARAMS = "category_type_cb=1&locality_district_id=1&per_page=60&sort=0";
 
   const endpoints = [
-    `${BASE}?category_main_cb=1&${PARAMS}`, // byty
-    `${BASE}?category_main_cb=2&${PARAMS}`, // domy
-    `${BASE}?category_main_cb=3&${PARAMS}`, // pozemky
+    `${BASE}?category_main_cb=1&${PARAMS}`,
+    `${BASE}?category_main_cb=2&${PARAMS}`,
+    `${BASE}?category_main_cb=3&${PARAMS}`,
   ];
-
-  const categorySlug: Record<number, string> = {
-    0: "byty",
-    1: "domy",
-    2: "pozemky",
-  };
 
   const listings: Listing[] = [];
 
@@ -172,7 +164,6 @@ export async function fetchSreality(): Promise<Listing[]> {
 
       for (const e of estates) {
         const locality: string = e.locality || "";
-        // Filtrujeme pouze město České Budějovice, ne okolní obce
         if (!isCB(locality)) continue;
         if (isMaj(locality)) continue;
 
@@ -185,10 +176,16 @@ export async function fetchSreality(): Promise<Listing[]> {
           ? `${Number(priceRaw).toLocaleString("cs-CZ")} Kč`
           : "Cena neuvedena";
 
-        const cat = categorySlug[i];
-        const seoLocality = e.seo?.locality || "ceske-budejovice";
-        const seoCategory = e.seo?.category_main_cb || cat;
-        const url = `https://www.sreality.cz/detail/${seoCategory}/prodej/${seoLocality}/${hash}`;
+        // URL sestavíme ze SEO objektu přímo z API
+        // Formát: /detail/prodej/{category_main_cb}/{sub_category_cb}/{locality}/{hash}
+        const seo = e.seo || {};
+        const categoryMain = seo.category_main_cb || "";
+        const categorySub = seo.category_sub_cb || "";
+        const seoLocality = seo.locality || "ceske-budejovice";
+
+        let url = `https://www.sreality.cz/detail/prodej/${categoryMain}`;
+        if (categorySub) url += `/${categorySub}`;
+        url += `/${seoLocality}/${hash}`;
 
         listings.push({
           id: `sreality_${hash}`,
@@ -214,6 +211,17 @@ export async function fetchSreality(): Promise<Listing[]> {
 function isMaj(text: string): boolean {
   const lower = text.toLowerCase();
   return lower.includes("máj") || lower.includes("sídliště máj");
+}
+
+function isPronajemText(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("pronájem") ||
+    lower.includes("pronajm") ||
+    lower.includes("k pronájmu") ||
+    lower.includes("nájem") ||
+    lower.includes("podnájem")
+  );
 }
 
 function extractPrice(text: string): string {
