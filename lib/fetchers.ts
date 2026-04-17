@@ -42,8 +42,6 @@ export async function fetchBazos(): Promise<Listing[]> {
       if (isPoptavka(titleLower) || isPoptavka(descLower)) continue;
       if (isNesmysl(titleLower) || isNesmysl(descLower)) continue;
       if (!isByt(titleLower) && !isByt(descLower)) continue;
-
-      // Přeskočit družstevní byty — pokud výslovně uvádí družstvo a ne OV
       if (isDruzstvo(titleLower, descLower)) continue;
 
       listings.push({
@@ -64,80 +62,68 @@ export async function fetchBazos(): Promise<Listing[]> {
 }
 
 // ─────────────────────────────────────────────
-// BEZREALITKY – GraphQL API, byty OV
+// BEZREALITKY – parsování HTML stránky
 // ─────────────────────────────────────────────
 export async function fetchBezrealitky(): Promise<Listing[]> {
-  const query = `
-    query AdvertList($regionOsmIds: [ID!], $offerType: OfferType!, $estateType: [EstateType!], $ownership: [Ownership!]) {
-      advertList(
-        regionOsmIds: $regionOsmIds
-        offerType: $offerType
-        estateType: $estateType
-        ownership: $ownership
-        limit: 20
-        order: CREATED_AT_DESC
-      ) {
-        list {
-          id
-          uri
-          name
-          price
-          currency
-          note
-          locality {
-            address
-          }
-        }
-      }
-    }
-  `;
+  const url = "https://www.bezrealitky.cz/vypis/nabidka-prodej/byt/jihoceskykraj/ceske-budejovice";
+  const listings: Listing[] = [];
 
   try {
-    const res = await fetch("https://www.bezrealitky.cz/api/", {
-      method: "POST",
+    const res = await fetch(url, {
       headers: {
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 RealityWatchdog/1.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        Accept: "text/html",
       },
-      body: JSON.stringify({
-        query,
-        variables: {
-          regionOsmIds: ["R442469"],
-          offerType: "PRODEJ",
-          estateType: ["BYT"],
-          ownership: ["OSOBNI"],
-        },
-      }),
       next: { revalidate: 0 },
     });
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    // Pokud ownership filtr nefunguje, fallback na základní dotaz
-    const list = data?.data?.advertList?.list || [];
+    if (!res.ok) return listings;
+    const html = await res.text();
 
-    return list
-      .filter((item: any) => !isMaj((item.locality?.address || "").toLowerCase()))
-      .map((item: any) => ({
+    // Bezrealitky vkládají data jako JSON do stránky
+    // Hledáme pole inzerátů v __NEXT_DATA__ nebo v inline JSON
+    const match = html.match(/"advertList":\{"list":(\[.*?\])\}/s) ||
+                  html.match(/"list":(\[.*?\]),"total"/s);
+
+    if (!match) return listings;
+
+    let list: any[] = [];
+    try {
+      list = JSON.parse(match[1]);
+    } catch {
+      return listings;
+    }
+
+    for (const item of list) {
+      if (!item.id) continue;
+      const address = item.address || "";
+      if (isMaj(address.toLowerCase())) continue;
+
+      const title = item.imageAltText || item.name || "Inzerát";
+      const price = item.price
+        ? `${Number(item.price).toLocaleString("cs-CZ")} ${item.currency || "Kč"}`
+        : "Cena neuvedena";
+      const uri = item.uri || `${item.id}-nabidka-prodej-bytu`;
+
+      listings.push({
         id: `bezrealitky_${item.id}`,
-        title: item.name || "Inzerát",
-        price: item.price
-          ? `${Number(item.price).toLocaleString("cs-CZ")} ${item.currency || "Kč"}`
-          : "Cena neuvedena",
-        url: `https://www.bezrealitky.cz/${item.uri}`,
+        title,
+        price,
+        url: `https://www.bezrealitky.cz/nemovitosti-byty-domy/${uri}`,
         source: "Bezrealitky",
-        description: (item.note || "").slice(0, 200),
-        location: item.locality?.address || "České Budějovice",
-      }));
+        description: address,
+        location: address,
+      });
+    }
   } catch (e) {
     console.error("Bezrealitky fetch error:", e);
-    return [];
   }
+
+  return listings;
 }
 
 // ─────────────────────────────────────────────
 // SREALITY – byty OV na prodej v ČB
-// ownership=1 = osobní vlastnictví
 // ─────────────────────────────────────────────
 const CATEGORY_SUB: Record<number, string> = {
   2: "1+kk",
@@ -162,7 +148,6 @@ function isCB(text: string): boolean {
 }
 
 export async function fetchSreality(): Promise<Listing[]> {
-  // ownership=1 = osobní vlastnictví
   const url = "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=1&category_type_cb=1&locality_district_id=1&ownership=1&per_page=60&sort=0";
   const listings: Listing[] = [];
 
@@ -287,7 +272,6 @@ function isByt(text: string): boolean {
   );
 }
 
-// Přeskočit pokud je výslovně uvedeno družstevní a není uvedeno OV
 function isDruzstvo(title: string, desc: string): boolean {
   const hasDruzstvo =
     title.includes("družstevní") ||
