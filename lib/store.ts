@@ -16,3 +16,9 @@ export async function filterNewIds(ids: string[]): Promise<string[]> {
   const newIds = ids.filter((id) => !storedSet.has(id));
 
   if (newIds.length > 0) {
+    await redis.sadd(SEEN_KEY, newIds[0], ...newIds.slice(1));
+    await redis.expire(SEEN_KEY, TTL);
+  }
+
+  return newIds;
+}
