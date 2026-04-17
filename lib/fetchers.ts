@@ -10,11 +10,14 @@ export interface Listing {
   location?: string;
 }
 
+// ─────────────────────────────────────────────
+// BAZOŠ – RSS feed
+// ─────────────────────────────────────────────
 export async function fetchBazos(): Promise<Listing[]> {
   const urls = [
-    "https://reality.bazos.cz/rss.php?rub=&hledat=&irss=&hlokalita=%C4%8Cesk%C3%A9+Bud%C4%9Bjovice&rubriky=byty&posted=",
-    "https://reality.bazos.cz/rss.php?rub=&hledat=&irss=&hlokalita=%C4%8Cesk%C3%A9+Bud%C4%9Bjovice&rubriky=domy&posted=",
-    "https://reality.bazos.cz/rss.php?rub=&hledat=&irss=&hlokalita=%C4%8Cesk%C3%A9+Bud%C4%9Bjovice&rubriky=pozemky&posted=",
+    "https://reality.bazos.cz/rss.php?hlokalita=%C4%8Cesk%C3%A9+Bud%C4%9Bjovice&rubriky=byty",
+    "https://reality.bazos.cz/rss.php?hlokalita=%C4%8Cesk%C3%A9+Bud%C4%9Bjovice&rubriky=domy",
+    "https://reality.bazos.cz/rss.php?hlokalita=%C4%8Cesk%C3%A9+Bud%C4%9Bjovice&rubriky=pozemky",
   ];
 
   const listings: Listing[] = [];
@@ -34,12 +37,15 @@ export async function fetchBazos(): Promise<Listing[]> {
 
       for (const item of arr) {
         const title: string = item.title || "";
+        const link: string = item.link || "";
+        if (!link) continue;
         if (isMaj(title) || isMaj(item.description || "")) continue;
+
         listings.push({
-          id: `bazos_${item.link}`,
+          id: `bazos_${link}`,
           title,
           price: extractPrice(item.description || title),
-          url: item.link,
+          url: link,
           source: "Bazoš",
           description: stripHtml(item.description || "").slice(0, 200),
           location: "České Budějovice",
@@ -53,6 +59,9 @@ export async function fetchBazos(): Promise<Listing[]> {
   return listings;
 }
 
+// ─────────────────────────────────────────────
+// BEZREALITKY – GraphQL API
+// ─────────────────────────────────────────────
 export async function fetchBezrealitky(): Promise<Listing[]> {
   const query = `
     query AdvertList($regionOsmIds: [ID!], $offerType: OfferType!, $estateType: [EstateType!]) {
@@ -119,18 +128,33 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
   }
 }
 
+// ─────────────────────────────────────────────
+// SREALITY – JSON API
+// locality_municipality_id=537 = České Budějovice
+// category_type_cb=1 = prodej
+// category_main_cb: 1=byty, 2=domy, 3=pozemky
+// ─────────────────────────────────────────────
 export async function fetchSreality(): Promise<Listing[]> {
+  const BASE = "https://www.sreality.cz/api/cs/v2/estates";
+  const PARAMS = "category_type_cb=1&locality_municipality_id=537&per_page=20&sort=0";
+
   const endpoints = [
-    "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=1&category_type_cb=1&locality_region_id=10&locality_district_id=42&locality_municipality_id=537&per_page=20&sort=0",
-    "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=2&category_type_cb=1&locality_region_id=10&locality_district_id=42&locality_municipality_id=537&per_page=20&sort=0",
-    "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=3&category_type_cb=1&locality_region_id=10&locality_district_id=42&locality_municipality_id=537&per_page=20&sort=0",
+    `${BASE}?category_main_cb=1&${PARAMS}`, // byty
+    `${BASE}?category_main_cb=2&${PARAMS}`, // domy
+    `${BASE}?category_main_cb=3&${PARAMS}`, // pozemky
   ];
+
+  const categorySlug: Record<number, string> = {
+    1: "byty",
+    2: "domy",
+    3: "pozemky",
+  };
 
   const listings: Listing[] = [];
 
-  for (const url of endpoints) {
+  for (let i = 0; i < endpoints.length; i++) {
     try {
-      const res = await fetch(url, {
+      const res = await fetch(endpoints[i], {
         headers: {
           "User-Agent": "Mozilla/5.0 RealityWatchdog/1.0",
           Accept: "application/json",
@@ -147,17 +171,24 @@ export async function fetchSreality(): Promise<Listing[]> {
         if (isMaj(locality)) continue;
 
         const hash = e.hash_id;
+        if (!hash) continue;
+
         const name: string = e.name || "Inzerát";
-        const priceObj = e.price_czk;
-        const price = priceObj?.value_raw
-          ? `${Number(priceObj.value_raw).toLocaleString("cs-CZ")} Kč`
+        const priceRaw = e.price_czk?.value_raw;
+        const price = priceRaw
+          ? `${Number(priceRaw).toLocaleString("cs-CZ")} Kč`
           : "Cena neuvedena";
+
+        // Sestavíme správné URL pro detail inzerátu
+        const cat = categorySlug[i + 1] || "byty";
+        const seoLocality = e.seo?.locality || "ceske-budejovice";
+        const url = `https://www.sreality.cz/detail/${cat}/prodej/${seoLocality}/${hash}`;
 
         listings.push({
           id: `sreality_${hash}`,
           title: name,
           price,
-          url: `https://www.sreality.cz/detail/${e.seo?.category_main_cb || "byt"}/prodej/${e.seo?.locality || "ceske-budejovice"}/${hash}`,
+          url,
           source: "Sreality",
           description: e.meta_description?.slice(0, 200),
           location: locality,
@@ -171,9 +202,12 @@ export async function fetchSreality(): Promise<Listing[]> {
   return listings;
 }
 
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
 function isMaj(text: string): boolean {
   const lower = text.toLowerCase();
-  return lower.includes("máj") || lower.includes("maj ") || lower.includes("sídliště máj");
+  return lower.includes("máj") || lower.includes("sídliště máj");
 }
 
 function extractPrice(text: string): string {
