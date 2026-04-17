@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { fetchBazos, fetchBezrealitky, fetchSreality } from "@/lib/fetchers";
+import { fetchBazos, fetchSreality } from "@/lib/fetchers";
 import { filterNewIds } from "@/lib/store";
 import { sendNewListingsEmail } from "@/lib/email";
 
@@ -14,27 +14,22 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const [bazos, bezrealitky, sreality] = await Promise.allSettled([
+    const [bazos, sreality] = await Promise.allSettled([
       fetchBazos(),
-      fetchBezrealitky(),
       fetchSreality(),
     ]);
 
     const debug = {
       bazos: bazos.status === "fulfilled"
         ? { count: bazos.value.length, sample: bazos.value[0] || null }
-        : { error: bazos.reason?.message || String(bazos.reason) },
-      bezrealitky: bezrealitky.status === "fulfilled"
-        ? { count: bezrealitky.value.length, sample: bezrealitky.value[0] || null }
-        : { error: bezrealitky.reason?.message || String(bezrealitky.reason) },
+        : { error: String((bazos as any).reason) },
       sreality: sreality.status === "fulfilled"
         ? { count: sreality.value.length, sample: sreality.value[0] || null }
-        : { error: sreality.reason?.message || String(sreality.reason) },
+        : { error: String((sreality as any).reason) },
     };
 
     const allListings = [
       ...(bazos.status === "fulfilled" ? bazos.value : []),
-      ...(bezrealitky.status === "fulfilled" ? bezrealitky.value : []),
       ...(sreality.status === "fulfilled" ? sreality.value : []),
     ];
 
