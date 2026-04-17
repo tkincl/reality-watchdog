@@ -13,14 +13,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  console.log("🔍 Spouštím hlídače realit...");
-
   try {
     const [bazos, bezrealitky, sreality] = await Promise.allSettled([
       fetchBazos(),
       fetchBezrealitky(),
       fetchSreality(),
     ]);
+
+    const debug = {
+      bazos: bazos.status === "fulfilled"
+        ? { count: bazos.value.length, sample: bazos.value[0] || null }
+        : { error: bazos.reason?.message || String(bazos.reason) },
+      bezrealitky: bezrealitky.status === "fulfilled"
+        ? { count: bezrealitky.value.length, sample: bezrealitky.value[0] || null }
+        : { error: bezrealitky.reason?.message || String(bezrealitky.reason) },
+      sreality: sreality.status === "fulfilled"
+        ? { count: sreality.value.length, sample: sreality.value[0] || null }
+        : { error: sreality.reason?.message || String(sreality.reason) },
+    };
 
     const allListings = [
       ...(bazos.status === "fulfilled" ? bazos.value : []),
@@ -29,14 +39,12 @@ export async function GET(req: NextRequest) {
     ];
 
     if (allListings.length === 0) {
-      return NextResponse.json({ message: "Žádné výsledky", newCount: 0 });
+      return NextResponse.json({ message: "Žádné výsledky", newCount: 0, debug });
     }
 
     const allIds = allListings.map((l) => l.id);
     const newIds = await filterNewIds(allIds);
     const newListings = allListings.filter((l) => newIds.includes(l.id));
-
-    console.log(`✨ Nových inzerátů: ${newListings.length}`);
 
     if (newListings.length > 0) {
       await sendNewListingsEmail(newListings);
@@ -46,9 +54,9 @@ export async function GET(req: NextRequest) {
       success: true,
       total: allListings.length,
       newCount: newListings.length,
+      debug,
     });
   } catch (error) {
-    console.error("Cron error:", error);
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
