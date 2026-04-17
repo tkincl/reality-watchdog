@@ -15,9 +15,7 @@ export interface Listing {
 // ─────────────────────────────────────────────
 export async function fetchBazos(): Promise<Listing[]> {
   const urls = [
-    "https://reality.bazos.cz/rss.php?hlokalita=%C4%8Cesk%C3%A9+Bud%C4%9Bjovice&rubriky=byty",
-    "https://reality.bazos.cz/rss.php?hlokalita=%C4%8Cesk%C3%A9+Bud%C4%9Bjovice&rubriky=domy",
-    "https://reality.bazos.cz/rss.php?hlokalita=%C4%8Cesk%C3%A9+Bud%C4%9Bjovice&rubriky=pozemky",
+    "https://www.bazos.cz/rss.php?rub=re&hlokalita=České+Budějovice&okruh=0",
   ];
 
   const listings: Listing[] = [];
@@ -129,13 +127,9 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
 }
 
 // ─────────────────────────────────────────────
-// SREALITY – filtrujeme okres ČB a pak jen město
+// SREALITY – locality_district_id=1 = okres České Budějovice
 // ─────────────────────────────────────────────
-const CB_KEYWORDS = [
-  "české budějovice",
-  "ceske budejovice",
-  "budějovice",
-];
+const CB_KEYWORDS = ["české budějovice", "budějovice"];
 
 function isCB(text: string): boolean {
   const lower = text.toLowerCase();
@@ -144,11 +138,13 @@ function isCB(text: string): boolean {
 
 export async function fetchSreality(): Promise<Listing[]> {
   const BASE = "https://www.sreality.cz/api/cs/v2/estates";
+  // locality_district_id=1 = okres České Budějovice (správné ID!)
+  const PARAMS = "category_type_cb=1&locality_district_id=1&per_page=60&sort=0";
 
   const endpoints = [
-    `${BASE}?category_main_cb=1&category_type_cb=1&locality_district_id=42&per_page=60&sort=0`,
-    `${BASE}?category_main_cb=2&category_type_cb=1&locality_district_id=42&per_page=60&sort=0`,
-    `${BASE}?category_main_cb=3&category_type_cb=1&locality_district_id=42&per_page=60&sort=0`,
+    `${BASE}?category_main_cb=1&${PARAMS}`, // byty
+    `${BASE}?category_main_cb=2&${PARAMS}`, // domy
+    `${BASE}?category_main_cb=3&${PARAMS}`, // pozemky
   ];
 
   const categorySlug: Record<number, string> = {
@@ -176,8 +172,7 @@ export async function fetchSreality(): Promise<Listing[]> {
 
       for (const e of estates) {
         const locality: string = e.locality || "";
-
-        // Pouze České Budějovice město, ne okolní obce
+        // Filtrujeme pouze město České Budějovice, ne okolní obce
         if (!isCB(locality)) continue;
         if (isMaj(locality)) continue;
 
