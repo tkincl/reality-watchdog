@@ -11,10 +11,11 @@ export interface Listing {
 }
 
 // ─────────────────────────────────────────────
-// BAZOŠ – RSS feed, pouze prodej v ČB
+// BAZOŠ – pouze byty na prodej v ČB
 // ─────────────────────────────────────────────
 export async function fetchBazos(): Promise<Listing[]> {
-  const url = "https://www.bazos.cz/rss.php?rub=re&hlokalita=České+Budějovice&okruh=0";
+  // rub=re&rubriky=byty = pouze sekce reality/byty
+  const url = "https://www.bazos.cz/rss.php?rub=re&hlokalita=České+Budějovice&okruh=0&rubriky=byty";
   const listings: Listing[] = [];
 
   try {
@@ -95,7 +96,7 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
         variables: {
           regionOsmIds: ["R442469"],
           offerType: "PRODEJ",
-          estateType: ["BYT", "DUM", "POZEMEK", "KOMERCNI"],
+          estateType: ["BYT"],
         },
       }),
       next: { revalidate: 0 },
@@ -125,19 +126,8 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
 }
 
 // ─────────────────────────────────────────────
-// SREALITY – správná URL ze SEO dat
+// SREALITY – pouze byty na prodej v ČB
 // ─────────────────────────────────────────────
-
-// Překlad category_main_cb na slug
-const CATEGORY_MAIN: Record<number, string> = {
-  1: "byt",
-  2: "dum",
-  3: "pozemek",
-  4: "komerc",
-  5: "ostatni",
-};
-
-// Překlad category_sub_cb na slug (dispozice bytů)
 const CATEGORY_SUB: Record<number, string> = {
   2: "1+kk",
   3: "1+1",
@@ -151,16 +141,6 @@ const CATEGORY_SUB: Record<number, string> = {
   11: "5+1",
   12: "6-a-vice",
   16: "atypicky",
-  // domy
-  37: "rodinny-dum",
-  39: "vila",
-  40: "na-klíc",
-  43: "chalupa",
-  44: "chata",
-  // pozemky
-  56: "bydleni",
-  57: "komercni",
-  58: "zahrada",
 };
 
 const CB_KEYWORDS = ["české budějovice", "budějovice"];
@@ -171,72 +151,59 @@ function isCB(text: string): boolean {
 }
 
 export async function fetchSreality(): Promise<Listing[]> {
-  const BASE = "https://www.sreality.cz/api/cs/v2/estates";
-  const PARAMS = "category_type_cb=1&locality_district_id=1&per_page=60&sort=0";
-
-  const endpoints = [
-    `${BASE}?category_main_cb=1&${PARAMS}`,
-    `${BASE}?category_main_cb=2&${PARAMS}`,
-    `${BASE}?category_main_cb=3&${PARAMS}`,
-  ];
-
+  // category_main_cb=1 = pouze byty
+  const url = "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=1&category_type_cb=1&locality_district_id=1&per_page=60&sort=0";
   const listings: Listing[] = [];
 
-  for (let i = 0; i < endpoints.length; i++) {
-    try {
-      const res = await fetch(endpoints[i], {
-        headers: {
-          "User-Agent": "Mozilla/5.0 RealityWatchdog/1.0",
-          Accept: "application/json",
-          Referer: "https://www.sreality.cz/",
-        },
-        next: { revalidate: 0 },
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 RealityWatchdog/1.0",
+        Accept: "application/json",
+        Referer: "https://www.sreality.cz/",
+      },
+      next: { revalidate: 0 },
+    });
+
+    if (!res.ok) return listings;
+    const data = await res.json();
+    const estates = data?._embedded?.estates || [];
+
+    for (const e of estates) {
+      const locality: string = e.locality || "";
+      if (!isCB(locality)) continue;
+      if (isMaj(locality)) continue;
+
+      const hash = e.hash_id;
+      if (!hash) continue;
+
+      const name: string = e.name || "Inzerát";
+      const priceRaw = e.price_czk?.value_raw;
+      const price = priceRaw
+        ? `${Number(priceRaw).toLocaleString("cs-CZ")} Kč`
+        : "Cena neuvedena";
+
+      const seo = e.seo || {};
+      const subCb = seo.category_sub_cb;
+      const seoLocality = seo.locality || "ceske-budejovice";
+      const subSlug = subCb ? CATEGORY_SUB[subCb] : null;
+
+      let url = `https://www.sreality.cz/detail/prodej/byt`;
+      if (subSlug) url += `/${subSlug}`;
+      url += `/${seoLocality}/${hash}`;
+
+      listings.push({
+        id: `sreality_${hash}`,
+        title: name,
+        price,
+        url,
+        source: "Sreality",
+        description: e.meta_description?.slice(0, 200),
+        location: locality,
       });
-
-      if (!res.ok) continue;
-      const data = await res.json();
-      const estates = data?._embedded?.estates || [];
-
-      for (const e of estates) {
-        const locality: string = e.locality || "";
-        if (!isCB(locality)) continue;
-        if (isMaj(locality)) continue;
-
-        const hash = e.hash_id;
-        if (!hash) continue;
-
-        const name: string = e.name || "Inzerát";
-        const priceRaw = e.price_czk?.value_raw;
-        const price = priceRaw
-          ? `${Number(priceRaw).toLocaleString("cs-CZ")} Kč`
-          : "Cena neuvedena";
-
-        // Sestavíme URL ze SEO dat
-        const seo = e.seo || {};
-        const mainCb = seo.category_main_cb;
-        const subCb = seo.category_sub_cb;
-        const seoLocality = seo.locality || "ceske-budejovice";
-
-        const mainSlug = CATEGORY_MAIN[mainCb] || "byt";
-        const subSlug = subCb ? CATEGORY_SUB[subCb] : null;
-
-        let url = `https://www.sreality.cz/detail/prodej/${mainSlug}`;
-        if (subSlug) url += `/${subSlug}`;
-        url += `/${seoLocality}/${hash}`;
-
-        listings.push({
-          id: `sreality_${hash}`,
-          title: name,
-          price,
-          url,
-          source: "Sreality",
-          description: e.meta_description?.slice(0, 200),
-          location: locality,
-        });
-      }
-    } catch (e) {
-      console.error("Sreality fetch error:", e);
     }
+  } catch (e) {
+    console.error("Sreality fetch error:", e);
   }
 
   return listings;
