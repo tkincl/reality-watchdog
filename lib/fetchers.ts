@@ -11,10 +11,9 @@ export interface Listing {
 }
 
 // ─────────────────────────────────────────────
-// BAZOŠ – pouze byty na prodej v ČB
+// BAZOŠ – byty na prodej v ČB, OV
 // ─────────────────────────────────────────────
 export async function fetchBazos(): Promise<Listing[]> {
-  // rub=re&rubriky=byty = pouze sekce reality/byty
   const url = "https://www.bazos.cz/rss.php?rub=re&hlokalita=České+Budějovice&okruh=0&rubriky=byty";
   const listings: Listing[] = [];
 
@@ -34,10 +33,18 @@ export async function fetchBazos(): Promise<Listing[]> {
       const title: string = item.title || "";
       const link: string = item.link || "";
       const desc: string = item.description || "";
+      const titleLower = title.toLowerCase();
+      const descLower = desc.toLowerCase();
 
       if (!link) continue;
-      if (isPronajemText(title) || isPronajemText(desc)) continue;
-      if (isMaj(title) || isMaj(desc)) continue;
+      if (isPronajemText(titleLower) || isPronajemText(descLower)) continue;
+      if (isMaj(titleLower) || isMaj(descLower)) continue;
+      if (isPoptavka(titleLower) || isPoptavka(descLower)) continue;
+      if (isNesmysl(titleLower) || isNesmysl(descLower)) continue;
+      if (!isByt(titleLower) && !isByt(descLower)) continue;
+
+      // Přeskočit družstevní byty — pokud výslovně uvádí družstvo a ne OV
+      if (isDruzstvo(titleLower, descLower)) continue;
 
       listings.push({
         id: `bazos_${link}`,
@@ -57,15 +64,16 @@ export async function fetchBazos(): Promise<Listing[]> {
 }
 
 // ─────────────────────────────────────────────
-// BEZREALITKY – GraphQL API
+// BEZREALITKY – GraphQL API, byty OV
 // ─────────────────────────────────────────────
 export async function fetchBezrealitky(): Promise<Listing[]> {
   const query = `
-    query AdvertList($regionOsmIds: [ID!], $offerType: OfferType!, $estateType: [EstateType!]) {
+    query AdvertList($regionOsmIds: [ID!], $offerType: OfferType!, $estateType: [EstateType!], $ownership: [Ownership!]) {
       advertList(
         regionOsmIds: $regionOsmIds
         offerType: $offerType
         estateType: $estateType
+        ownership: $ownership
         limit: 20
         order: CREATED_AT_DESC
       ) {
@@ -97,6 +105,7 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
           regionOsmIds: ["R442469"],
           offerType: "PRODEJ",
           estateType: ["BYT"],
+          ownership: ["OSOBNI"],
         },
       }),
       next: { revalidate: 0 },
@@ -104,10 +113,11 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
+    // Pokud ownership filtr nefunguje, fallback na základní dotaz
     const list = data?.data?.advertList?.list || [];
 
     return list
-      .filter((item: any) => !isMaj(item.locality?.address || ""))
+      .filter((item: any) => !isMaj((item.locality?.address || "").toLowerCase()))
       .map((item: any) => ({
         id: `bezrealitky_${item.id}`,
         title: item.name || "Inzerát",
@@ -126,7 +136,8 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
 }
 
 // ─────────────────────────────────────────────
-// SREALITY – pouze byty na prodej v ČB
+// SREALITY – byty OV na prodej v ČB
+// ownership=1 = osobní vlastnictví
 // ─────────────────────────────────────────────
 const CATEGORY_SUB: Record<number, string> = {
   2: "1+kk",
@@ -151,8 +162,8 @@ function isCB(text: string): boolean {
 }
 
 export async function fetchSreality(): Promise<Listing[]> {
-  // category_main_cb=1 = pouze byty
-  const url = "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=1&category_type_cb=1&locality_district_id=1&per_page=60&sort=0";
+  // ownership=1 = osobní vlastnictví
+  const url = "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=1&category_type_cb=1&locality_district_id=1&ownership=1&per_page=60&sort=0";
   const listings: Listing[] = [];
 
   try {
@@ -172,7 +183,7 @@ export async function fetchSreality(): Promise<Listing[]> {
     for (const e of estates) {
       const locality: string = e.locality || "";
       if (!isCB(locality)) continue;
-      if (isMaj(locality)) continue;
+      if (isMaj(locality.toLowerCase())) continue;
 
       const hash = e.hash_id;
       if (!hash) continue;
@@ -188,15 +199,15 @@ export async function fetchSreality(): Promise<Listing[]> {
       const seoLocality = seo.locality || "ceske-budejovice";
       const subSlug = subCb ? CATEGORY_SUB[subCb] : null;
 
-      let url = `https://www.sreality.cz/detail/prodej/byt`;
-      if (subSlug) url += `/${subSlug}`;
-      url += `/${seoLocality}/${hash}`;
+      let detailUrl = `https://www.sreality.cz/detail/prodej/byt`;
+      if (subSlug) detailUrl += `/${subSlug}`;
+      detailUrl += `/${seoLocality}/${hash}`;
 
       listings.push({
         id: `sreality_${hash}`,
         title: name,
         price,
-        url,
+        url: detailUrl,
         source: "Sreality",
         description: e.meta_description?.slice(0, 200),
         location: locality,
@@ -213,19 +224,87 @@ export async function fetchSreality(): Promise<Listing[]> {
 // Helpers
 // ─────────────────────────────────────────────
 function isMaj(text: string): boolean {
-  const lower = text.toLowerCase();
-  return lower.includes("máj") || lower.includes("sídliště máj");
+  return text.includes("máj") || text.includes("sídliště máj");
 }
 
 function isPronajemText(text: string): boolean {
-  const lower = text.toLowerCase();
   return (
-    lower.includes("pronájem") ||
-    lower.includes("pronajm") ||
-    lower.includes("k pronájmu") ||
-    lower.includes("nájem") ||
-    lower.includes("podnájem")
+    text.includes("pronájem") ||
+    text.includes("pronajm") ||
+    text.includes("k pronájmu") ||
+    text.includes("nájem") ||
+    text.includes("podnájem")
   );
+}
+
+function isPoptavka(text: string): boolean {
+  return (
+    text.includes("hledám") ||
+    text.includes("hledam") ||
+    text.includes("koupím") ||
+    text.includes("koupim") ||
+    text.includes("nabídněte") ||
+    text.includes("nabidnete") ||
+    text.includes("poptávám") ||
+    text.includes("sháním") ||
+    text.includes("shanim") ||
+    text.includes("mám zájem") ||
+    text.includes("chtěl bych koupit") ||
+    text.includes("chtel bych")
+  );
+}
+
+function isNesmysl(text: string): boolean {
+  return (
+    text.includes("kontejner") ||
+    text.includes("sklad") ||
+    text.includes("kancelář") ||
+    text.includes("kancelar") ||
+    text.includes("pozemek") ||
+    text.includes("parcela") ||
+    text.includes("rodinný") ||
+    text.includes("garáž") ||
+    text.includes("garaz") ||
+    text.includes("chalupa") ||
+    text.includes("chata") ||
+    text.includes("vila ")
+  );
+}
+
+function isByt(text: string): boolean {
+  return (
+    text.includes("byt") ||
+    text.includes("1+kk") ||
+    text.includes("2+kk") ||
+    text.includes("3+kk") ||
+    text.includes("4+kk") ||
+    text.includes("1+1") ||
+    text.includes("2+1") ||
+    text.includes("3+1") ||
+    text.includes("4+1") ||
+    text.includes("garsonka") ||
+    text.includes("garsoniera")
+  );
+}
+
+// Přeskočit pokud je výslovně uvedeno družstevní a není uvedeno OV
+function isDruzstvo(title: string, desc: string): boolean {
+  const hasDruzstvo =
+    title.includes("družstevní") ||
+    title.includes("druzstevni") ||
+    title.includes("družstvo") ||
+    desc.includes("družstevní") ||
+    desc.includes("druzstevni");
+
+  const hasOV =
+    title.includes("osobní vlastnictví") ||
+    title.includes("osobni vlastnictvi") ||
+    title.includes("ov)") ||
+    title.includes("(ov") ||
+    desc.includes("osobní vlastnictví") ||
+    desc.includes("osobni vlastnictvi");
+
+  return hasDruzstvo && !hasOV;
 }
 
 function extractPrice(text: string): string {
