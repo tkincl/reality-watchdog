@@ -129,25 +129,32 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
 }
 
 // ─────────────────────────────────────────────
-// SREALITY – JSON API
-// locality_municipality_id=537 = České Budějovice
-// category_type_cb=1 = prodej
-// category_main_cb: 1=byty, 2=domy, 3=pozemky
+// SREALITY – filtrujeme okres ČB a pak jen město
 // ─────────────────────────────────────────────
+const CB_KEYWORDS = [
+  "české budějovice",
+  "ceske budejovice",
+  "budějovice",
+];
+
+function isCB(text: string): boolean {
+  const lower = text.toLowerCase();
+  return CB_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
 export async function fetchSreality(): Promise<Listing[]> {
   const BASE = "https://www.sreality.cz/api/cs/v2/estates";
-  const PARAMS = "category_type_cb=1&locality_municipality_id=537&per_page=20&sort=0";
 
   const endpoints = [
-    `${BASE}?category_main_cb=1&${PARAMS}`, // byty
-    `${BASE}?category_main_cb=2&${PARAMS}`, // domy
-    `${BASE}?category_main_cb=3&${PARAMS}`, // pozemky
+    `${BASE}?category_main_cb=1&category_type_cb=1&locality_district_id=42&per_page=60&sort=0`,
+    `${BASE}?category_main_cb=2&category_type_cb=1&locality_district_id=42&per_page=60&sort=0`,
+    `${BASE}?category_main_cb=3&category_type_cb=1&locality_district_id=42&per_page=60&sort=0`,
   ];
 
   const categorySlug: Record<number, string> = {
-    1: "byty",
-    2: "domy",
-    3: "pozemky",
+    0: "byty",
+    1: "domy",
+    2: "pozemky",
   };
 
   const listings: Listing[] = [];
@@ -158,6 +165,7 @@ export async function fetchSreality(): Promise<Listing[]> {
         headers: {
           "User-Agent": "Mozilla/5.0 RealityWatchdog/1.0",
           Accept: "application/json",
+          Referer: "https://www.sreality.cz/",
         },
         next: { revalidate: 0 },
       });
@@ -168,6 +176,9 @@ export async function fetchSreality(): Promise<Listing[]> {
 
       for (const e of estates) {
         const locality: string = e.locality || "";
+
+        // Pouze České Budějovice město, ne okolní obce
+        if (!isCB(locality)) continue;
         if (isMaj(locality)) continue;
 
         const hash = e.hash_id;
@@ -179,10 +190,10 @@ export async function fetchSreality(): Promise<Listing[]> {
           ? `${Number(priceRaw).toLocaleString("cs-CZ")} Kč`
           : "Cena neuvedena";
 
-        // Sestavíme správné URL pro detail inzerátu
-        const cat = categorySlug[i + 1] || "byty";
+        const cat = categorySlug[i];
         const seoLocality = e.seo?.locality || "ceske-budejovice";
-        const url = `https://www.sreality.cz/detail/${cat}/prodej/${seoLocality}/${hash}`;
+        const seoCategory = e.seo?.category_main_cb || cat;
+        const url = `https://www.sreality.cz/detail/${seoCategory}/prodej/${seoLocality}/${hash}`;
 
         listings.push({
           id: `sreality_${hash}`,
