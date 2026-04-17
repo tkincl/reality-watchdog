@@ -80,16 +80,34 @@ export async function fetchBezrealitky(): Promise<Listing[]> {
     if (!res.ok) return listings;
     const html = await res.text();
 
-    // Bezrealitky vkládají data jako JSON do stránky
-    // Hledáme pole inzerátů v __NEXT_DATA__ nebo v inline JSON
-    const match = html.match(/"advertList":\{"list":(\[.*?\])\}/s) ||
-                  html.match(/"list":(\[.*?\]),"total"/s);
+    // Najdeme JSON data v HTML bez /s flagu
+    const startMarker = '"advertList":{"list":';
+    const startIdx = html.indexOf(startMarker);
+    if (startIdx === -1) return listings;
 
-    if (!match) return listings;
+    // Najdeme začátek pole
+    const arrayStart = html.indexOf("[", startIdx);
+    if (arrayStart === -1) return listings;
+
+    // Najdeme konec pole — počítáme závorky
+    let depth = 0;
+    let arrayEnd = -1;
+    for (let i = arrayStart; i < html.length; i++) {
+      if (html[i] === "[") depth++;
+      else if (html[i] === "]") {
+        depth--;
+        if (depth === 0) {
+          arrayEnd = i;
+          break;
+        }
+      }
+    }
+
+    if (arrayEnd === -1) return listings;
 
     let list: any[] = [];
     try {
-      list = JSON.parse(match[1]);
+      list = JSON.parse(html.slice(arrayStart, arrayEnd + 1));
     } catch {
       return listings;
     }
