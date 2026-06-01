@@ -37,12 +37,16 @@ export async function fetchBazos(): Promise<Listing[]> {
       const descLower = desc.toLowerCase();
 
       if (!link) continue;
-      if (isPronajemText(titleLower) || isPronajemText(descLower)) continue;
-      if (isMaj(titleLower) || isMaj(descLower)) continue;
-      if (isPoptavka(titleLower) || isPoptavka(descLower)) continue;
-      if (isNesmysl(titleLower) || isNesmysl(descLower)) continue;
-      if (!isByt(titleLower) && !isByt(descLower)) continue;
+
+      // Filtrujeme POUZE podle titulku — desc může obsahovat "byt" v reklamním textu
+      if (isPronajemText(titleLower)) continue;
+      if (isMaj(titleLower)) continue;
+      if (isPoptavka(titleLower)) continue;
+      if (isNesmysl(titleLower)) continue;
       if (isDruzstvo(titleLower, descLower)) continue;
+
+      // Titulek MUSÍ obsahovat byt nebo dispozici
+      if (!isBytVTitulku(titleLower)) continue;
 
       listings.push({
         id: `bazos_${link}`,
@@ -63,7 +67,6 @@ export async function fetchBazos(): Promise<Listing[]> {
 
 // ─────────────────────────────────────────────
 // SREALITY – byty na prodej v ČB
-// ownership=1 odebrán — filtrujeme v kódu
 // ─────────────────────────────────────────────
 const CATEGORY_SUB: Record<number, string> = {
   2: "1+kk",
@@ -88,7 +91,6 @@ function isCB(text: string): boolean {
 }
 
 export async function fetchSreality(): Promise<Listing[]> {
-  // Odebrán ownership=1 který přestal fungovat
   const url = "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=1&category_type_cb=1&locality_district_id=1&per_page=60&sort=0";
   const listings: Listing[] = [];
 
@@ -116,15 +118,14 @@ export async function fetchSreality(): Promise<Listing[]> {
       if (!hash) continue;
 
       const name: string = e.name || "Inzerát";
+      const nameLower = name.toLowerCase();
+      const metaLower = (e.meta_description || "").toLowerCase();
+      if (isDruzstvo(nameLower, metaLower)) continue;
+
       const priceRaw = e.price_czk?.value_raw;
       const price = priceRaw
         ? `${Number(priceRaw).toLocaleString("cs-CZ")} Kč`
         : "Cena neuvedena";
-
-      // Filtrujeme družstevní v názvu/popisu
-      const nameLower = name.toLowerCase();
-      const metaLower = (e.meta_description || "").toLowerCase();
-      if (isDruzstvo(nameLower, metaLower)) continue;
 
       const seo = e.seo || {};
       const subCb = seo.category_sub_cb;
@@ -186,7 +187,7 @@ function isPoptavka(text: string): boolean {
     text.includes("sháním") ||
     text.includes("shanim") ||
     text.includes("mám zájem") ||
-    text.includes("chtěl bych koupit") ||
+    text.includes("chtěl bych") ||
     text.includes("chtel bych")
   );
 }
@@ -195,33 +196,48 @@ function isNesmysl(text: string): boolean {
   return (
     text.includes("kontejner") ||
     text.includes("mobilheim") ||
+    text.includes("mobilhome") ||
     text.includes("sklad") ||
     text.includes("kancelář") ||
     text.includes("kancelar") ||
     text.includes("pozemek") ||
     text.includes("parcela") ||
     text.includes("rodinný") ||
+    text.includes("rodinny") ||
     text.includes("garáž") ||
     text.includes("garaz") ||
     text.includes("chalupa") ||
     text.includes("chata") ||
-    text.includes("vila ")
+    text.includes("vila ") ||
+    text.includes("apartmán") ||
+    text.includes("apartman") ||
+    text.includes("příprava nemovitosti") ||
+    text.includes("priprava nemovitosti") ||
+    text.includes("realitní") ||
+    text.includes("realitni") ||
+    text.includes("dům ") ||
+    text.includes("dum ")
   );
 }
 
-function isByt(text: string): boolean {
+// Kontroluje POUZE titulek — přísná whitelist kontrola
+function isBytVTitulku(title: string): boolean {
   return (
-    text.includes("byt") ||
-    text.includes("1+kk") ||
-    text.includes("2+kk") ||
-    text.includes("3+kk") ||
-    text.includes("4+kk") ||
-    text.includes("1+1") ||
-    text.includes("2+1") ||
-    text.includes("3+1") ||
-    text.includes("4+1") ||
-    text.includes("garsonka") ||
-    text.includes("garsoniera")
+    title.includes("prodej bytu") ||
+    title.includes("prodej byt") ||
+    title.includes("byt na prodej") ||
+    title.includes("1+kk") ||
+    title.includes("2+kk") ||
+    title.includes("3+kk") ||
+    title.includes("4+kk") ||
+    title.includes("5+kk") ||
+    title.includes("1+1") ||
+    title.includes("2+1") ||
+    title.includes("3+1") ||
+    title.includes("4+1") ||
+    title.includes("garsonka") ||
+    title.includes("garsoniera") ||
+    title.includes("garsoniéra")
   );
 }
 
