@@ -37,21 +37,21 @@ export async function fetchBazos(): Promise<Listing[]> {
       const descLower = desc.toLowerCase();
 
       if (!link) continue;
-
-      // Filtrujeme podle titulku I popisu pro pronájem/poptávku
       if (isPronajemText(titleLower) || isPronajemText(descLower)) continue;
       if (isPoptavka(titleLower) || isPoptavka(descLower)) continue;
       if (isMaj(titleLower)) continue;
       if (isNesmysl(titleLower)) continue;
       if (isDruzstvo(titleLower, descLower)) continue;
-
-      // Titulek MUSÍ obsahovat byt nebo dispozici
       if (!isBytVTitulku(titleLower)) continue;
+
+      // Filtr na cenu — pokud je cena uvedena a je pod 500 000, jde o pronájem
+      const priceNum = extractPriceNumber(title + " " + desc);
+      if (priceNum !== null && priceNum < 500000) continue;
 
       listings.push({
         id: `bazos_${link}`,
         title,
-        price: extractPrice(desc || title),
+        price: priceNum ? `${priceNum.toLocaleString("cs-CZ")} Kč` : "Cena neuvedena",
         url: link,
         source: "Bazoš",
         description: stripHtml(desc).slice(0, 200),
@@ -123,6 +123,7 @@ export async function fetchSreality(): Promise<Listing[]> {
       if (isDruzstvo(nameLower, metaLower)) continue;
 
       const priceRaw = e.price_czk?.value_raw;
+      if (priceRaw && priceRaw < 500000) continue;
       const price = priceRaw
         ? `${Number(priceRaw).toLocaleString("cs-CZ")} Kč`
         : "Cena neuvedena";
@@ -167,6 +168,8 @@ function isPronajemText(text: string): boolean {
     text.includes("přenájem") ||
     text.includes("prenájem") ||
     text.includes("prenajm") ||
+    text.includes("prenájom") ||
+    text.includes("prenajom") ||
     text.includes("k pronájmu") ||
     text.includes("nájem") ||
     text.includes("podnájem") ||
@@ -186,7 +189,6 @@ function isPoptavka(text: string): boolean {
     text.includes("koupim") ||
     text.includes("nabídněte") ||
     text.includes("nabidnete") ||
-    text.includes("nabídněte") ||
     text.includes("poptávám") ||
     text.includes("poptavam") ||
     text.includes("sháním") ||
@@ -232,6 +234,7 @@ function isBytVTitulku(title: string): boolean {
     title.includes("prodej bytu") ||
     title.includes("prodej byt") ||
     title.includes("byt na prodej") ||
+    title.includes("byt ") ||
     title.includes("1+kk") ||
     title.includes("2+kk") ||
     title.includes("3+kk") ||
@@ -266,9 +269,17 @@ function isDruzstvo(title: string, desc: string): boolean {
   return hasDruzstvo && !hasOV;
 }
 
+function extractPriceNumber(text: string): number | null {
+  // Hledáme číslo následované "kč" nebo za dvojtečkou na konci titulku
+  const match = text.match(/:\s*([\d\s]+)\s*$/i) || text.match(/([\d\s]{5,})\s*kč/i);
+  if (!match) return null;
+  const num = parseInt(match[1].replace(/\s/g, ""), 10);
+  return isNaN(num) ? null : num;
+}
+
 function extractPrice(text: string): string {
-  const match = text.match(/[\d\s]{4,}[\s]*kč/i);
-  return match ? match[0].trim() : "Cena neuvedena";
+  const num = extractPriceNumber(text);
+  return num ? `${num.toLocaleString("cs-CZ")} Kč` : "Cena neuvedena";
 }
 
 function stripHtml(html: string): string {
