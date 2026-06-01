@@ -11,7 +11,7 @@ export interface Listing {
 }
 
 // ─────────────────────────────────────────────
-// BAZOŠ – byty na prodej v ČB, OV
+// BAZOŠ – byty na prodej v ČB
 // ─────────────────────────────────────────────
 export async function fetchBazos(): Promise<Listing[]> {
   const url = "https://www.bazos.cz/rss.php?rub=re&hlokalita=České+Budějovice&okruh=0&rubriky=byty";
@@ -62,7 +62,8 @@ export async function fetchBazos(): Promise<Listing[]> {
 }
 
 // ─────────────────────────────────────────────
-// SREALITY – byty OV na prodej v ČB
+// SREALITY – byty na prodej v ČB
+// ownership=1 odebrán — filtrujeme v kódu
 // ─────────────────────────────────────────────
 const CATEGORY_SUB: Record<number, string> = {
   2: "1+kk",
@@ -87,15 +88,17 @@ function isCB(text: string): boolean {
 }
 
 export async function fetchSreality(): Promise<Listing[]> {
-  const url = "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=1&category_type_cb=1&locality_district_id=1&ownership=1&per_page=60&sort=0";
+  // Odebrán ownership=1 který přestal fungovat
+  const url = "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=1&category_type_cb=1&locality_district_id=1&per_page=60&sort=0";
   const listings: Listing[] = [];
 
   try {
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 RealityWatchdog/1.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept: "application/json",
-        Referer: "https://www.sreality.cz/",
+        Referer: "https://www.sreality.cz/hledani/prodej/byty/ceske-budejovice",
+        "Accept-Language": "cs-CZ,cs;q=0.9",
       },
       next: { revalidate: 0 },
     });
@@ -117,6 +120,11 @@ export async function fetchSreality(): Promise<Listing[]> {
       const price = priceRaw
         ? `${Number(priceRaw).toLocaleString("cs-CZ")} Kč`
         : "Cena neuvedena";
+
+      // Filtrujeme družstevní v názvu/popisu
+      const nameLower = name.toLowerCase();
+      const metaLower = (e.meta_description || "").toLowerCase();
+      if (isDruzstvo(nameLower, metaLower)) continue;
 
       const seo = e.seo || {};
       const subCb = seo.category_sub_cb;
@@ -157,7 +165,12 @@ function isPronajemText(text: string): boolean {
     text.includes("pronajm") ||
     text.includes("k pronájmu") ||
     text.includes("nájem") ||
-    text.includes("podnájem")
+    text.includes("podnájem") ||
+    text.includes("ubytování") ||
+    text.includes("ubytovani") ||
+    text.includes("pokoj") ||
+    text.includes("lůžko") ||
+    text.includes("luzko")
   );
 }
 
@@ -181,6 +194,7 @@ function isPoptavka(text: string): boolean {
 function isNesmysl(text: string): boolean {
   return (
     text.includes("kontejner") ||
+    text.includes("mobilheim") ||
     text.includes("sklad") ||
     text.includes("kancelář") ||
     text.includes("kancelar") ||
