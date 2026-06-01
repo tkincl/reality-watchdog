@@ -38,10 +38,10 @@ export async function fetchBazos(): Promise<Listing[]> {
 
       if (!link) continue;
 
-      // Filtrujeme POUZE podle titulku — desc může obsahovat "byt" v reklamním textu
-      if (isPronajemText(titleLower)) continue;
+      // Filtrujeme podle titulku I popisu pro pronájem/poptávku
+      if (isPronajemText(titleLower) || isPronajemText(descLower)) continue;
+      if (isPoptavka(titleLower) || isPoptavka(descLower)) continue;
       if (isMaj(titleLower)) continue;
-      if (isPoptavka(titleLower)) continue;
       if (isNesmysl(titleLower)) continue;
       if (isDruzstvo(titleLower, descLower)) continue;
 
@@ -164,6 +164,9 @@ function isPronajemText(text: string): boolean {
   return (
     text.includes("pronájem") ||
     text.includes("pronajm") ||
+    text.includes("přenájem") ||
+    text.includes("prenájem") ||
+    text.includes("prenajm") ||
     text.includes("k pronájmu") ||
     text.includes("nájem") ||
     text.includes("podnájem") ||
@@ -183,12 +186,16 @@ function isPoptavka(text: string): boolean {
     text.includes("koupim") ||
     text.includes("nabídněte") ||
     text.includes("nabidnete") ||
+    text.includes("nabídněte") ||
     text.includes("poptávám") ||
+    text.includes("poptavam") ||
     text.includes("sháním") ||
     text.includes("shanim") ||
     text.includes("mám zájem") ||
     text.includes("chtěl bych") ||
-    text.includes("chtel bych")
+    text.includes("chtel bych") ||
+    text.includes("hledáme") ||
+    text.includes("hledame")
   );
 }
 
@@ -220,7 +227,6 @@ function isNesmysl(text: string): boolean {
   );
 }
 
-// Kontroluje POUZE titulek — přísná whitelist kontrola
 function isBytVTitulku(title: string): boolean {
   return (
     title.includes("prodej bytu") ||
